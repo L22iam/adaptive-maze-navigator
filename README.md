@@ -92,7 +92,3 @@ ros2 run turtlebot3_teleop teleop_keyboard
 ## Author
 
 Liam Debono — University of Malta, Faculty of ICT
-
-## License
-
-MIT License — Academic project for ARI3215 Robotics 2
