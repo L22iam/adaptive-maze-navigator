@@ -2,3 +2,7 @@ build/
 install/
 log/
 metrics/
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
