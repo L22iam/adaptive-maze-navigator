@@ -5,11 +5,11 @@
 # ===========================================
 
 echo "Killing any existing processes..."
-pkill -f "gz sim" 2>/dev/null
-pkill -f "ros_gz_bridge" 2>/dev/null
-pkill -f "nav2" 2>/dev/null
-pkill -f "component_container" 2>/dev/null
-pkill -f "static_transform_publisher" 2>/dev/null
+pkill -f "gz sim" 2>/dev/null || true
+pkill -f "ros_gz_bridge" 2>/dev/null || true
+pkill -f "nav2" 2>/dev/null || true
+pkill -f "component_container" 2>/dev/null || true
+pkill -f "static_transform_publisher" 2>/dev/null || true
 sleep 3
 
 source /opt/ros/jazzy/setup.bash
@@ -27,7 +27,12 @@ sleep 8
 echo "[2/7] Starting Bridge..."
 gnome-terminal --title="BRIDGE" -- bash -c '
 source /opt/ros/jazzy/setup.bash
-ros2 run ros_gz_bridge parameter_bridge /cmd_vel@geometry_msgs/msg/TwistStamped]gz.msgs.Twist /scan@sensor_msgs/msg/LaserScan[gz.msgs.LaserScan /odom@nav_msgs/msg/Odometry[gz.msgs.Odometry /tf@tf2_msgs/msg/TFMessage[gz.msgs.Pose_V /clock@rosgraph_msgs/msg/Clock[gz.msgs.Clock
+ros2 run ros_gz_bridge parameter_bridge \
+  /cmd_vel@geometry_msgs/msg/TwistStamped@gz.msgs.Twist \
+  /scan@sensor_msgs/msg/LaserScan@gz.msgs.LaserScan \
+  /odom@nav_msgs/msg/Odometry@gz.msgs.Odometry \
+  /tf@tf2_msgs/msg/TFMessage@gz.msgs.Pose_V \
+  /clock@rosgraph_msgs/msg/Clock@gz.msgs.Clock
 exec bash'
 sleep 3
 
@@ -42,18 +47,18 @@ exec bash'
 sleep 3
 
 echo "[4/7] Starting Nav2 (wait ~40 seconds)..."
-gnome-terminal --title="NAV2" -- bash -c '
+gnome-terminal --title="NAV2" -- bash -c "
 source /opt/ros/jazzy/setup.bash
 export TURTLEBOT3_MODEL=waffle
-ros2 launch nav2_bringup bringup_launch.py use_sim_time:=true map:=/home/liam-debono/turtlebot3_ws/src/maps/maze_map_clean.yaml params_file:=/opt/ros/jazzy/share/turtlebot3_navigation2/param/waffle.yaml autostart:=true
-exec bash'
+ros2 launch nav2_bringup bringup_launch.py use_sim_time:=true map:=$HOME/turtlebot3_ws/src/maps/maze_map_clean.yaml params_file:=/opt/ros/jazzy/share/turtlebot3_navigation2/param/waffle.yaml autostart:=true
+exec bash"
 
 echo "Waiting 40 seconds for Nav2 to fully initialize..."
 sleep 40
 
 echo "[5/7] Applying costmap fixes..."
-ros2 param set /global_costmap/global_costmap track_unknown_space false
-ros2 param set /global_costmap/global_costmap unknown_cost_value -1
+ros2 param set /global_costmap/global_costmap track_unknown_space false || true
+ros2 param set /global_costmap/global_costmap unknown_cost_value -1 || true
 sleep 2
 
 echo "[6/7] Opening Gazebo GUI and Teleop..."
@@ -81,8 +86,11 @@ exec bash'
 sleep 2
 
 echo "[7/7] Setting initial pose at (7, 0)..."
-ros2 topic pub /initialpose geometry_msgs/msg/PoseWithCovarianceStamped '{header: {frame_id: "map"}, pose: {pose: {position: {x: 7.0, y: 0.0, z: 0.0}, orientation: {w: 1.0}}}}' --once
-sleep 2
+# ros2 CLI here doesn't support --timeout, so use Linux timeout to avoid hanging forever
+timeout 10s ros2 topic pub /initialpose geometry_msgs/msg/PoseWithCovarianceStamped \
+  '{header: {frame_id: "map"}, pose: {pose: {position: {x: 7.0, y: 0.0, z: 0.0}, orientation: {w: 1.0}}}}' \
+  --once || true
+sleep 5
 
 echo ""
 echo "============================================"
@@ -109,8 +117,17 @@ mkdir -p $METRICS_DIR
 echo "Starting navigation to (3.0, 0.0)..." | tee $LOG_FILE
 START_TIME=$(date +%s.%N)
 
-ros2 action send_goal /navigate_to_pose nav2_msgs/action/NavigateToPose \
-  "{pose: {header: {frame_id: 'map'}, pose: {position: {x: 3.0, y: 0.0, z: 0.0}, orientation: {w: 1.0}}}}"
+# Send demo goal with retries (Nav2 can still be activating)
+for i in 1 2 3 4 5; do
+  echo "Sending demo goal (attempt $i)..." | tee -a "$LOG_FILE"
+  OUT=$(ros2 action send_goal /navigate_to_pose nav2_msgs/action/NavigateToPose \
+    "{pose: {header: {frame_id: 'map'}, pose: {position: {x: 3.0, y: 0.0, z: 0.0}, orientation: {w: 1.0}}}}" 2>&1)
+  echo "$OUT" | tee -a "$LOG_FILE"
+
+  echo "$OUT" | grep -qi "Goal accepted" && break
+  echo "Goal not accepted yet, waiting 5s..." | tee -a "$LOG_FILE"
+  sleep 5
+done
 
 END_TIME=$(date +%s.%N)
 NAV_TIME=$(echo "$END_TIME - $START_TIME" | bc)
